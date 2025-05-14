@@ -53,9 +53,8 @@ class RequestTimingsQueue extends ThreadSafe{
 
 	public function fetchTimings() : ?string {
 		return $this->synchronized(function(): ?string {
-			while($this->queries->count() === 0 && !$this->isInvalidated()){
-				$this->wait();
-			}
+			if ($this->queries->count() === 0 && !$this->isInvalidated())
+				return null;
 			return $this->queries->shift();
 		});
 	}
