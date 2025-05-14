@@ -46,11 +46,10 @@ class QuerySendQueue extends ThreadSafe{
 		});
 	}
 
-	public function fetchQuery() : ?string {
-		return $this->synchronized(function(): ?string {
-			while($this->queries->count() === 0 && !$this->isInvalidated()){
-				$this->wait();
-			}
+	public function fetchQuery() : string|false|null {
+		return $this->synchronized(function(): string|false|null {
+			if ($this->queries->count() === 0 && !$this->isInvalidated())
+				return false;
 			return $this->queries->shift();
 		});
 	}

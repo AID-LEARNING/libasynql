@@ -13,11 +13,11 @@ class TimingsModded
 	use SingletonTrait;
 
 	private \ReflectionProperty $asyncTaskRunProperty;
-	private function __construct() {
+	public function __construct() {
 		$this->asyncTaskRunProperty = new \ReflectionProperty(Timings::class, 'asyncTaskRun');
 	}
 
-	public  function getCustomThreadRunTimings(SqlSlaveThread $thread, string $group = Timings::GROUP_MINECRAFT) : TimingsHandler{
+	public function getCustomThreadRunTimings(SqlSlaveThread $thread, string $group = Timings::GROUP_MINECRAFT) : TimingsHandler{
 		$taskClass = $thread::class;
 		$asyncTaskRunProperty = $this->asyncTaskRunProperty;
 		$asyncTaskRun = $asyncTaskRunProperty->getValue();
@@ -39,13 +39,5 @@ class TimingsModded
 			return (new \ReflectionClass($class))->getShortName();
 		}
 		return $class;
-	}
-
-	/**
-	 * @return self
-	 */
-	public static function getInstance(): TimingsModded
-	{
-		return self::$instance;
 	}
 }

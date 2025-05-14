@@ -83,6 +83,7 @@ abstract class SqlSlaveThread extends Thread implements SqlThread{
 	}
 
 	protected function onRun() : void{
+		\GlobalLogger::set($this->logger);
 		$error = $this->createConn($resource);
 		$this->connCreated = true;
 		$this->connError = $error;
@@ -113,15 +114,18 @@ abstract class SqlSlaveThread extends Thread implements SqlThread{
 					\GlobalLogger::get()->debug("Reset timings");
 				}else if($action === RequestTimingsQueue::GET_TIMINGS) {
 					$this->timingsResponse->publishResult($queryId, TimingsHandler::printCurrentThreadRecords());
+					$notifier->wakeupSleeper();
 				}
+			}
+			$row = $this->bufferSend->fetchQuery();
+			if($row === null){
+				break;
+			}else if($row === false) {
+				continue;
 			}
 			if ($enableTiming){
 				$timing = TimingsModded::getInstance()->getCustomThreadRunTimings($this);
 				$timing->startTiming();
-			}
-			$row = $this->bufferSend->fetchQuery();
-			if(!is_string($row)){
-				break;
 			}
 			$this->busy = true;
 			[$queryId, $modes, $queries, $params] = unserialize($row, ["allowed_classes" => true]);
