@@ -24,13 +24,20 @@ namespace poggit\libasynql\base;
 
 use InvalidArgumentException;
 use pmmp\thread\Thread as NativeThread;
+use pocketmine\GarbageCollectorManager;
+use pocketmine\promise\Promise;
+use pocketmine\promise\PromiseResolver;
 use pocketmine\Server;
 use pocketmine\snooze\SleeperHandlerEntry;
+use pocketmine\thread\log\AttachableThreadSafeLogger;
 use pocketmine\thread\Thread;
+use pocketmine\timings\Timings;
+use pocketmine\timings\TimingsHandler;
 use poggit\libasynql\libasynql;
 use poggit\libasynql\SqlError;
 use poggit\libasynql\SqlResult;
 use poggit\libasynql\SqlThread;
+use poggit\libasynql\utils\TimingsModded;
 
 abstract class SqlSlaveThread extends Thread implements SqlThread{
 	private SleeperHandlerEntry $sleeperEntry;
@@ -43,11 +50,20 @@ abstract class SqlSlaveThread extends Thread implements SqlThread{
 	protected $connCreated = false;
 	protected $connError;
 	protected $busy = false;
+	protected AttachableThreadSafeLogger $logger;
+	private RequestTimingsQueue $timingsRequest;
+	private ResponseTimingsQueue $timingsResponse;
+
+	private static ?GarbageCollectorManager $cycleGcManager = null;
 
 	protected function __construct(SleeperHandlerEntry $entry, QuerySendQueue $bufferSend = null, QueryRecvQueue $bufferRecv = null){
+
 		$this->sleeperEntry = $entry;
+		$this->logger = Server::getInstance()->getLogger();
 
 		$this->slaveNumber = self::$nextSlaveNumber++;
+		$this->timingsRequest = new RequestTimingsQueue();
+		$this->timingsResponse = new ResponseTimingsQueue();
 		$this->bufferSend = $bufferSend ?? new QuerySendQueue();
 		$this->bufferRecv = $bufferRecv ?? new QueryRecvQueue();
 
@@ -61,6 +77,11 @@ abstract class SqlSlaveThread extends Thread implements SqlThread{
 		$this->start(NativeThread::INHERIT_INI);
 	}
 
+
+	public function addRequestTimings(int $timingsId, int $mode): void{
+		$this->timingsRequest->scheduleTimings($timingsId, $mode);
+	}
+
 	protected function onRun() : void{
 		$error = $this->createConn($resource);
 		$this->connCreated = true;
@@ -71,15 +92,39 @@ abstract class SqlSlaveThread extends Thread implements SqlThread{
 		if($error !== null){
 			return;
 		}
-
+		Timings::init();
+		self::$cycleGcManager = new GarbageCollectorManager($this->logger, Timings::$asyncTaskWorkers);
+		$timing = null;
+		$enableTiming = TimingsHandler::isEnabled();
 		while(true){
+			$timings = $this->timingsRequest->fetchTimings();
+			if ($timings !== null){
+				[$queryId, $action] = unserialize($timings);
+				if($action === RequestTimingsQueue::ENABLE_TIMINGS){
+					$enableTiming = true;
+					TimingsHandler::setEnabled();
+					\GlobalLogger::get()->debug("Enabled timings");
+				}elseif($action === RequestTimingsQueue::DISABLE_TIMINGS){
+					TimingsHandler::setEnabled(false);
+					$enableTiming = false;
+					\GlobalLogger::get()->debug("Disabled timings");
+				}elseif($action === RequestTimingsQueue::RELOAD_TIMINGS) {
+					TimingsHandler::reload();
+					\GlobalLogger::get()->debug("Reset timings");
+				}else if($action === RequestTimingsQueue::GET_TIMINGS) {
+					$this->timingsResponse->publishResult($queryId, TimingsHandler::printCurrentThreadRecords());
+				}
+			}
+			if ($enableTiming){
+				$timing = TimingsModded::getInstance()->getCustomThreadRunTimings($this);
+				$timing->startTiming();
+			}
 			$row = $this->bufferSend->fetchQuery();
 			if(!is_string($row)){
 				break;
 			}
 			$this->busy = true;
 			[$queryId, $modes, $queries, $params] = unserialize($row, ["allowed_classes" => true]);
-
 			try{
 				$results = [];
 				foreach($queries as $index => $query){
@@ -88,9 +133,14 @@ abstract class SqlSlaveThread extends Thread implements SqlThread{
 				$this->bufferRecv->publishResult($queryId, $results);
 			}catch(SqlError $error){
 				$this->bufferRecv->publishError($queryId, $error);
+			}finally{
+				if ($enableTiming) {
+					$timing->stopTiming();
+				}
 			}
 
 			$notifier->wakeupSleeper();
+			self::$cycleGcManager->maybeCollectCycles();
 			$this->busy = false;
 		}
 		$this->close($resource);
@@ -130,6 +180,27 @@ abstract class SqlSlaveThread extends Thread implements SqlThread{
 			}
 
 			$callbacks[$queryId]($results);
+			unset($callbacks[$queryId]);
+		}
+	}
+
+	/**
+	 * @param array<PromiseResolver> $callbacks
+	 * @param int|null $expectedResults
+	 * @return void
+	 */
+	public function readResultsTimings(array &$callbacks, ?int $expectedResults) : void
+	{
+		if($expectedResults === null){
+			$resultsList = $this->timingsResponse->fetchAllResults();
+		}else{
+			$resultsList = $this->timingsResponse->waitForResults($expectedResults);
+		}
+		foreach($resultsList as [$queryId, $results]){
+			if(!isset($callbacks[$queryId])){
+				throw new InvalidArgumentException("Missing handler for query #$queryId");
+			}
+			$callbacks[$queryId]->resolve($results);
 			unset($callbacks[$queryId]);
 		}
 	}

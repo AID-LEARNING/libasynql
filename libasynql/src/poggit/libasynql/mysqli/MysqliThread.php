@@ -60,8 +60,6 @@ use const PHP_INT_MAX;
 class MysqliThread extends SqlSlaveThread{
 	/** @var string */
 	private $credentials;
-	/** @var AttachableThreadSafeLogger */
-	private $logger;
 
 	public static function createFactory(MysqlCredentials $credentials, AttachableThreadSafeLogger $logger) : Closure{
 		return function(SleeperHandlerEntry $sleeperEntry, QuerySendQueue $bufferSend, QueryRecvQueue $bufferRecv) use ($credentials, $logger){
@@ -71,9 +69,9 @@ class MysqliThread extends SqlSlaveThread{
 
 	public function __construct(MysqlCredentials $credentials, SleeperHandlerEntry $entry, AttachableThreadSafeLogger $logger, QuerySendQueue $bufferSend = null, QueryRecvQueue $bufferRecv = null){
 		$this->credentials = serialize($credentials);
-		$this->logger = $logger;
 
 		parent::__construct($entry, $bufferSend, $bufferRecv);
+		$this->logger = $logger;
 	}
 
 	protected function createConn(&$mysqli) : ?string{

@@ -23,6 +23,8 @@ declare(strict_types=1);
 namespace poggit\libasynql\base;
 
 use InvalidArgumentException;
+use pocketmine\promise\Promise;
+use pocketmine\promise\PromiseResolver;
 use pocketmine\Server;
 use pocketmine\snooze\SleeperHandlerEntry;
 use poggit\libasynql\SqlThread;
@@ -30,6 +32,8 @@ use poggit\libasynql\SqlThread;
 class SqlThreadPool implements SqlThread{
 
 	private SleeperHandlerEntry $sleeperEntry;
+
+	private static int $TIMINGS_ID = 0;
 	/** @var callable */
 	private $workerFactory;
 	/** @var SqlSlaveThread[] */
@@ -62,6 +66,7 @@ class SqlThreadPool implements SqlThread{
 		$this->sleeperEntry = Server::getInstance()->getTickSleeper()->addNotifier(function() : void{
 			assert($this->dataConnector instanceof DataConnectorImpl); // otherwise, wtf
 			$this->dataConnector->checkResults();
+			$this->dataConnector->checkResultsTimings();
 		});
 
 		$this->workerFactory = $workerFactory;
@@ -102,6 +107,11 @@ class SqlThreadPool implements SqlThread{
 		}
 	}
 
+
+	public function addRequestTimings(int $timingsId, int $mode) : void{
+		$worker->addRequestTimings($timingsId, $mode);
+	}
+
 	public function readResults(array &$callbacks, ?int $expectedResults) : void{
 		if($expectedResults === null){
 			$resultsList = $this->bufferRecv->fetchAllResults();
@@ -115,6 +125,17 @@ class SqlThreadPool implements SqlThread{
 
 			$callbacks[$queryId]($results);
 			unset($callbacks[$queryId]);
+		}
+	}
+
+	/**
+	 * @param array<PromiseResolver> $callbacks
+	 * @param int|null $expectedResults
+	 * @return void
+	 */
+	public function readResultsTimings(array &$callbacks, ?int $expectedResults) : void{
+		foreach ($this->workers as $worker){
+			$worker->readResultsTimings($callbacks, $expectedResults);
 		}
 	}
 
@@ -132,5 +153,10 @@ class SqlThreadPool implements SqlThread{
 
 	public function getLoad() : float{
 		return $this->bufferSend->count() / (float) $this->workerLimit;
+	}
+
+	public function countWorkers() : int
+	{
+		return count($this->workers);
 	}
 }

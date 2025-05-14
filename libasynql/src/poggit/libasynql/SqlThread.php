@@ -50,7 +50,9 @@ interface SqlThread{
 	 */
 	public function addQuery(int $queryId, array $modes, array $queries, array $params) : void;
 
-	/**
+	public function addRequestTimings(int $timingsId, int $mode) : void;
+
+		/**
 	 * Handles the results that this query has completed
 	 *
 	 * @param callable[] $callbacks
@@ -58,7 +60,9 @@ interface SqlThread{
 	 */
 	public function readResults(array &$callbacks, ?int $expectedResults) : void;
 
-	/**
+	public function readResultsTimings(array &$callbacks, ?int $expectedResults) : void;
+
+		/**
 	 * Checks if the initial connection has been made, no matter successful or not.
 	 *
 	 * @return bool

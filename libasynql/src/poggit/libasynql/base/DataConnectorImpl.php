@@ -28,6 +28,10 @@ use Generator;
 use InvalidArgumentException;
 use Logger;
 use pocketmine\plugin\Plugin;
+use pocketmine\promise\PromiseResolver;
+use pocketmine\scheduler\TimingsCollectionTask;
+use pocketmine\scheduler\TimingsControlTask;
+use pocketmine\timings\TimingsHandler;
 use pocketmine\utils\Terminal;
 use poggit\libasynql\DataConnector;
 use poggit\libasynql\generic\GenericStatementFileParser;
@@ -62,6 +66,13 @@ class DataConnectorImpl implements DataConnector{
 	private $queries = [];
 	/** @var callable[] */
 	private $handlers = [];
+
+	/**
+	 * @var PromiseResolver[][]
+	 */
+	private array $timingsPromise = [];
+
+	private int $timingsId = 0;
 	/** @var int */
 	private $queryId = 0;
 	/** @var string|null */
@@ -81,6 +92,37 @@ class DataConnectorImpl implements DataConnector{
 		$this->thread = $thread;
 		$this->logger = $logQueries ? $plugin->getLogger() : null;
 		$this->placeHolder = $placeHolder;
+
+		TimingsHandler::getToggleCallbacks()->add(function(bool $enable) : void{
+			$this->thread->addRequestTimings(-1,($enable ? RequestTimingsQueue::ENABLE_TIMINGS : RequestTimingsQueue::DISABLE_TIMINGS));
+		});
+		TimingsHandler::getReloadCallbacks()->add(function (): void{
+			$this->thread->addRequestTimings(-1,RequestTimingsQueue::RELOAD_TIMINGS);
+		});
+		TimingsHandler::getCollectCallbacks()->add(function() : array{
+			$promises = [];
+			$timingsId = $this->timingsId++;
+			$resolver = new PromiseResolver();
+			if ($this->thread instanceof SqlThreadPool) {
+				$countWorker = $this->thread->countWorkers();
+				$this->thread->addRequestTimings($timingsId, RequestTimingsQueue::GET_TIMINGS);
+				for ($workerId = 0; $workerId < $countWorker; ++$workerId) {
+					if (!isset($this->timingsPromise[$workerId])) {
+						$this->timingsPromise[$workerId] = [];
+					}
+					$this->timingsPromise[$workerId][$timingsId] = $resolver;
+				}
+				$resolver[] = $resolver->getPromise();
+			}else {
+				$this->thread->addRequestTimings($timingsId, RequestTimingsQueue::GET_TIMINGS);
+				if (!isset($this->timingsPromise[0])) {
+					$this->timingsPromise[0] = [];
+				}
+				$this->timingsPromise[0][$timingsId] = $resolver;
+			}
+
+			return $promises;
+		});
 	}
 
 	public function setLoggingQueries(bool $loggingQueries) : void{
@@ -116,6 +158,28 @@ class DataConnectorImpl implements DataConnector{
 			throw new InvalidArgumentException("Duplicate GenericStatement: {$stmt->getName()}");
 		}
 		$this->queries[$stmt->getName()] = $stmt;
+	}
+
+	public function addRequestTimings(int $mode, ?PromiseResolver $resolver = null) : void
+	{
+		$timingsId = $this->timingsId++;
+		if ($this->thread instanceof SqlThreadPool){
+			$countWorker = $this->thread->countWorkers();
+			$this->thread->addRequestTimings($timingsId, $mode);
+			if($resolver) {
+				for ($workerId = 0; $workerId < $countWorker; ++$workerId) {
+					if (!isset($this->timingsPromise[$workerId])) {
+						$this->timingsPromise[$workerId] = [];
+					}
+					$this->timingsPromise[$workerId][$timingsId] = $resolver;
+				}
+			}
+		} else {
+			$this->thread->addRequestTimings($timingsId, $mode);
+			if($resolver) {
+			$this->timingsPromise[0][$timingsId] = $resolver;
+			}
+		}
 	}
 
 	public function executeGeneric(string $queryName, array $args = [], ?callable $onSuccess = null, ?callable $onError = null) : void{
@@ -320,6 +384,22 @@ class DataConnectorImpl implements DataConnector{
 
 	public function checkResults() : void{
 		$this->thread->readResults($this->handlers, null);
+	}
+
+	public function checkResultsTimings() : void{
+		$size = count($this->timingsPromise);
+		for($workerId = 0; $workerId < $size; ++$workerId){
+			$this->thread->readResultsTimings($this->timingsPromise[$workerId], null);
+		}
+	}
+
+	public function waitAllTimings() : void{
+		while(!empty($this->timingsPromise)){
+			$size = count($this->timingsPromise);
+			for($workerId = 0; $workerId < $size; ++$workerId){
+				$this->thread->readResultsTimings($this->timingsPromise[$workerId], count($this->timingsPromise[$workerId]));
+			}
+		}
 	}
 
 	public function close() : void{
