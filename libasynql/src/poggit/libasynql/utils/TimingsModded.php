@@ -5,15 +5,15 @@ namespace poggit\libasynql\utils;
 use pocketmine\scheduler\AsyncTask;
 use pocketmine\timings\Timings;
 use pocketmine\timings\TimingsHandler;
+use pocketmine\utils\SingletonTrait;
 use poggit\libasynql\base\SqlSlaveThread;
 
 class TimingsModded
 {
-	private static $instance;
+	use SingletonTrait;
 
 	private \ReflectionProperty $asyncTaskRunProperty;
 	private function __construct() {
-		self::$instance = $this;
 		$this->asyncTaskRunProperty = new \ReflectionProperty(Timings::class, 'asyncTaskRun');
 	}
 

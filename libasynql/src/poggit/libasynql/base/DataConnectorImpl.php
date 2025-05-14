@@ -102,23 +102,24 @@ class DataConnectorImpl implements DataConnector{
 		TimingsHandler::getCollectCallbacks()->add(function() : array{
 			$promises = [];
 			$timingsId = $this->timingsId++;
-			$resolver = new PromiseResolver();
+			$this->thread->addRequestTimings($timingsId, RequestTimingsQueue::GET_TIMINGS);
 			if ($this->thread instanceof SqlThreadPool) {
 				$countWorker = $this->thread->countWorkers();
-				$this->thread->addRequestTimings($timingsId, RequestTimingsQueue::GET_TIMINGS);
 				for ($workerId = 0; $workerId < $countWorker; ++$workerId) {
+					$resolver = new PromiseResolver();
 					if (!isset($this->timingsPromise[$workerId])) {
 						$this->timingsPromise[$workerId] = [];
 					}
 					$this->timingsPromise[$workerId][$timingsId] = $resolver;
+					$promises[] = $resolver->getPromise();
 				}
-				$resolver[] = $resolver->getPromise();
 			}else {
-				$this->thread->addRequestTimings($timingsId, RequestTimingsQueue::GET_TIMINGS);
+				$resolver = new PromiseResolver();
 				if (!isset($this->timingsPromise[0])) {
 					$this->timingsPromise[0] = [];
 				}
 				$this->timingsPromise[0][$timingsId] = $resolver;
+				$promises[] = $resolver->getPromise();
 			}
 
 			return $promises;
