@@ -141,6 +141,20 @@ class SqlThreadPool implements SqlThread{
 		}
 	}
 
+	/**
+	 * @param array<PromiseResolver> $callbacks
+	 * @param int|null $expectedResults
+	 * @param int $workerId
+	 * @return void
+	 */
+	public function readResultsTimingsByWorker(array &$callbacks, ?int $expectedResults, int $workerId) : void{
+		if (!isset($this->workers[$workerId])){
+			return;
+		}
+		$this->workers[$workerId]->readResultsTimings($callbacks, $expectedResults);
+
+	}
+
 	public function connCreated() : bool{
 		return $this->workers[0]->connCreated();
 	}

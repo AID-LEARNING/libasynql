@@ -389,16 +389,24 @@ class DataConnectorImpl implements DataConnector{
 
 	public function checkResultsTimings() : void{
 		$size = count($this->timingsPromise);
-		for($workerId = 0; $workerId < $size; ++$workerId){
-			$this->thread->readResultsTimings($this->timingsPromise[$workerId], null);
+		for($workerId = 0; $workerId < $size; ++$workerId) {
+			if ($this->thread instanceof SqlThreadPool) {
+				$this->thread->readResultsTimingsByWorker($this->timingsPromise[$workerId], null, $workerId);
+			}else {
+				$this->thread->readResultsTimings($this->timingsPromise[$workerId], null);
+			}
 		}
 	}
 
 	public function waitAllTimings() : void{
 		while(!empty($this->timingsPromise)){
 			$size = count($this->timingsPromise);
-			for($workerId = 0; $workerId < $size; ++$workerId){
-				$this->thread->readResultsTimings($this->timingsPromise[$workerId], count($this->timingsPromise[$workerId]));
+			for($workerId = 0; $workerId < $size; ++$workerId) {
+				if ($this->thread instanceof SqlThreadPool) {
+					$this->thread->readResultsTimingsByWorker($this->timingsPromise[$workerId], null, $workerId);
+				}else {
+					$this->thread->readResultsTimings($this->timingsPromise[$workerId], null);
+				}
 			}
 		}
 	}
