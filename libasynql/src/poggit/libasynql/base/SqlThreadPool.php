@@ -109,7 +109,9 @@ class SqlThreadPool implements SqlThread{
 
 
 	public function addRequestTimings(int $timingsId, int $mode) : void{
-		$worker->addRequestTimings($timingsId, $mode);
+		foreach ($this->workers as $_ => $worker){
+			$worker->addRequestTimings($timingsId, $mode);
+		}
 	}
 
 	public function readResults(array &$callbacks, ?int $expectedResults) : void{
