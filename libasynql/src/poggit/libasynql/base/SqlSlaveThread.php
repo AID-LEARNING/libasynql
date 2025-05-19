@@ -121,6 +121,7 @@ abstract class SqlSlaveThread extends Thread implements SqlThread{
 			if($row === null){
 				break;
 			}else if($row === false) {
+				usleep(500);
 				continue;
 			}
 			if ($enableTiming){
